@@ -2,12 +2,16 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"log"
+	"math/rand"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"tgbot/lib/e"
 	"tgbot/storage"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -47,11 +51,12 @@ func main() {
 	updates := bot.GetUpdatesChan(u)
 
 	for update := range updates {
-		if update.Message != nil { // If we got a message
+		if update.Message == nil { // If we got a message
 			continue
 
 		}
 		go handleCommand(bot, update.Message)
+
 	}
 }
 func handleCommand(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
@@ -92,7 +97,7 @@ func savePage(chatID int, pageURL string, username string) (err error) { //со�
 		URL:      pageURL,
 		UserName: username,
 	}
-	isExists, err := IsExists() //существует ли ссылка уже
+	isExists, err := IsExists(page) //существует ли ссылка уже 
 	if err != nil {
 		return err
 	}
@@ -108,22 +113,49 @@ func savePage(chatID int, pageURL string, username string) (err error) { //со�
 	return nil
 }
 
-func Save(page *storage.Page) error {
+type MyStorage struct {
+	Dataa []string
+	offset  int //используется, чтобы получить обновления, начиная не с самого первого, а с некоторого определённого ID.
+	storage storage.Storage
+	Data    string
+}
+
+func (s *MyStorage) Save(filename string) error {
+	// Реализация метода Save
+	file, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE, 0644)
+	if err != nil {
+		return err
+	}
+	defer func(file *os.File) {
+		err := file.Close()
+		if err != nil {
+
+		}
+	}(file)
+
+	// Запись данных в файл
+	_, err = file.WriteString(s.Data)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("Данные успешно сохранены в файл", filename)
 	return nil
-
-}
-func IsExists() (bool, error) {
-	return IzExists(msgAlreadyExists), nil
-
 }
 
-func IzExists(text string) bool {
-	q := url.Values{}
-	q.Add("text", text)
-
-	return true
-
+func (s *MyStorage) IsExists(p storage.Page) (bool, error) {
+	// Реализация метода IsExists
+	// Проверьте, существует ли страница в хранилище
+	// Верните true, если страница существует, и false, если она не существует
+	// Верните ошибку, если произошла ошибка при проверке
+	for _, data := range s.Dataa {
+		if data == p.URL {
+			return true, nil
+		}
+	}
+	return false, nil
 }
+
 
 func sendRandom(chatID int, username string) (err error) {
 	defer func() { err = e.WrapIfErr("cant do command:cant send random", err) }()
@@ -141,20 +173,50 @@ func sendRandom(chatID int, username string) (err error) {
 
 }
 
-func Remove(page *storage.Page) error {
+func (s *MyStorage) Remove(p *storage.Page) error {
+	// Реализация метода Remove
+	// Найдите страницу в хранилище и удалите ее
+	// Верните ошибку, если страница не найдена или произошла ошибка при удалении
+	index := -1
+	for i, data := range s.Dataa {
+		if data == p.URL {
+			index = i
+			break
+		}
+	}
+	if index == -1 {
+		return fmt.Errorf("page not found: %s", p.URL)
+	}
+	// Удаление страницы из хранилища
+	s.Dataa = append(s.Dataa[:index], s.Dataa[index+1:]...)
 	return nil
-
+}
 }
 
-func PickRandom(username string) (*storage.Page, error) {
-	return nil, nil
+func (s *MyStorage) PickRandom() (string, error) {
+	if len(s.Dataa) == 0 {
+		return "", fmt.Errorf("Нет доступных данных")
+	}
+
+	// Инициализация генератора случайных чисел
+	rand.Seed(time.Now().UnixNano())
+
+	// Выбор случайного элемента
+	randomIndex := rand.Intn(len(s.Data))
+	randomElement := s.Data[randomIndex]
+
+	return strconv.Itoa(int(randomElement)), nil
+}
 
 }
-func SendMessage(chatID int, text string) error { //chatID ,чтобы уточнить,куда конкретно отпр.сообщ
-	q := url.Values{}
-	q.Add("chat_id", strconv.Itoa(chatID))
-	q.Add("text", text)
+func SendMessage(chatID int, message string) error { //chatID ,чтобы уточнить,куда конкретно отпр.сообщ
+	bot, err := tgbotapi.NewBotAPI("6342619263:AAHm5ZpmMEn9ozRabHN4Es3YzzLt_ffocP8")
+	msg := tgbotapi.NewMessage(int64(chatID), message)
 
+	_, err = bot.Send(msg)
+	if err != nil {
+		log.Panic(err)
+	}
 	return nil
 }
 
