@@ -140,11 +140,10 @@ func (s *MyStorage) Save(filename string) error {
 	defer func(file *os.File) {
 		err := file.Close()
 		if err != nil {
-
+			fmt.Println("Ошибка при закрытии файла:", err)
 		}
 	}(file)
 
-	// Запись данных в файл
 	_, err = file.WriteString(s.Data)
 	if err != nil {
 		return err
@@ -268,4 +267,3 @@ func isURL(text string) bool {
 	u, err := url.Parse(text)         //распарсить URL-проанализировать текстовую запись URL и извлечь из него основные компоненты: хост, порт, путь, параметры и фрагмент
 	return err == nil && u.Host != "" //если при разборе нет ошибки и хост из разобарнного url не пустой
 }
-
