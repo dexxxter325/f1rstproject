@@ -7,11 +7,10 @@ import (
 	"math/rand"
 	"net/url"
 	"os"
-	"strconv"
+
 	"strings"
 	"tgbot/lib/e"
 	"tgbot/storage"
-	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -36,6 +35,7 @@ const (
 )
 
 func main() {
+
 	bot, err := tgbotapi.NewBotAPI("6342619263:AAHm5ZpmMEn9ozRabHN4Es3YzzLt_ffocP8")
 	if err != nil {
 		log.Panic(err)
@@ -91,20 +91,24 @@ func doCmd(text string, chatID int, username string) error { //doCmd-api роу�
 	}
 
 }
+
 func savePage(chatID int, pageURL string, username string) (err error) { //сохранение страницы в хранилище
+
 	defer func() { err = e.WrapIfErr("cant do command:save page", err) }() //Она обрабатывает ошибку только если она не nil.
 	page := &storage.Page{
 		URL:      pageURL,
 		UserName: username,
 	}
-	isExists, err := IsExists(page) //существует ли ссылка уже 
+	myStorage := &MyStorage{}
+
+	isExists, err := myStorage.IsExists(*page) //существует ли ссылка уже
 	if err != nil {
 		return err
 	}
 	if isExists {
 		return SendMessage(chatID, msgAlreadyExists)
 	}
-	if err := Save(page); err != nil {
+	if err := myStorage.Save(page.URL); err != nil {
 		return err
 	}
 	if err := SendMessage(chatID, msgSaved); err != nil {
@@ -113,11 +117,18 @@ func savePage(chatID int, pageURL string, username string) (err error) { //со�
 	return nil
 }
 
+type UserPage struct {
+	Username string
+	Page     *storage.Page
+}
+
 type MyStorage struct {
-	Dataa []string
-	offset  int //используется, чтобы получить обновления, начиная не с самого первого, а с некоторого определённого ID.
-	storage storage.Storage
-	Data    string
+	Dataa     []string
+	offset    int //используется, чтобы получить обновления, начиная не с самого первого, а с некоторого определённого ID.
+	storage   storage.Storage
+	Data      string
+	URL       string
+	UserPages []*UserPage
 }
 
 func (s *MyStorage) Save(filename string) error {
@@ -156,20 +167,22 @@ func (s *MyStorage) IsExists(p storage.Page) (bool, error) {
 	return false, nil
 }
 
-
 func sendRandom(chatID int, username string) (err error) {
 	defer func() { err = e.WrapIfErr("cant do command:cant send random", err) }()
-	page, err := PickRandom(username)
+	myStorage := &MyStorage{}
+
+	page, err := myStorage.PickRandom(username)
 	if err != nil && !errors.Is(err, storage.ErrNoSavedPages) { //errors.is позволяет определить, является ли конкретная ошибка заданным типом ошибки(когда нету сохр.стр)
 		return err
 	}
 	if errors.Is(err, storage.ErrNoSavedPages) {
 		return SendMessage(chatID, msgNoSavedPages) //если ниче не сохранил
 	}
-	if err := SendMessage(chatID, page.URL); err != nil { //если удалось найти ссылку
+	if err := SendMessage(chatID, myStorage.URL); err != nil { //если удалось найти ссылку
 		return err
 	}
-	return Remove(page) //удаляем ссылку
+
+	return myStorage.Remove(page) //удаляем ссылку
 
 }
 
@@ -191,24 +204,45 @@ func (s *MyStorage) Remove(p *storage.Page) error {
 	s.Dataa = append(s.Dataa[:index], s.Dataa[index+1:]...)
 	return nil
 }
-}
 
-func (s *MyStorage) PickRandom() (string, error) {
-	if len(s.Dataa) == 0 {
-		return "", fmt.Errorf("Нет доступных данных")
+func (s *MyStorage) PickRandom(username string) (*storage.Page, error) {
+	// Получить список страниц, связанных с указанным пользователем
+	userPages, err := s.getUserPages(username)
+	if err != nil {
+		return nil, err
 	}
 
-	// Инициализация генератора случайных чисел
-	rand.Seed(time.Now().UnixNano())
+	// Проверить, есть ли страницы для выбора случайной страницы
+	if len(userPages) == 0 {
+		return nil, storage.ErrNoSavedPages
+	}
 
-	// Выбор случайного элемента
-	randomIndex := rand.Intn(len(s.Data))
-	randomElement := s.Data[randomIndex]
+	// Сгенерировать случайный индекс в пределах длины списка страниц
+	randomIndex := rand.Intn(len(userPages))
 
-	return strconv.Itoa(int(randomElement)), nil
+	// Вернуть случайно выбранную страницу
+	return userPages[randomIndex], nil
+}
+func (s *MyStorage) getUserPages(username string) ([]*storage.Page, error) {
+	var userPages []*storage.Page
+
+	// Перебираем все страницы пользователей в нашем хранилище
+	for _, userPage := range s.UserPages {
+		if userPage.Username == username {
+			// Если имя пользователся совпадает, добавляем страницу в список
+			userPages = append(userPages, userPage.Page)
+		}
+	}
+
+	// Проверяем, есть ли страницы для выбранного пользователя
+	if len(userPages) == 0 {
+		return nil, storage.ErrNoSavedPages
+	}
+
+	// Возвращаем список страниц пользователя
+	return userPages, nil
 }
 
-}
 func SendMessage(chatID int, message string) error { //chatID ,чтобы уточнить,куда конкретно отпр.сообщ
 	bot, err := tgbotapi.NewBotAPI("6342619263:AAHm5ZpmMEn9ozRabHN4Es3YzzLt_ffocP8")
 	msg := tgbotapi.NewMessage(int64(chatID), message)
@@ -234,3 +268,4 @@ func isURL(text string) bool {
 	u, err := url.Parse(text)         //распарсить URL-проанализировать текстовую запись URL и извлечь из него основные компоненты: хост, порт, путь, параметры и фрагмент
 	return err == nil && u.Host != "" //если при разборе нет ошибки и хост из разобарнного url не пустой
 }
+
