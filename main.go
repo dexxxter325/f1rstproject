@@ -1,12 +1,15 @@
 package main
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
 	"math/rand"
 	"net/url"
 	"os"
+	"path"
 
 	"strings"
 	"tgbot/lib/e"
@@ -95,25 +98,39 @@ func doCmd(text string, chatID int, username string) error { //doCmd-api роу�
 func savePage(chatID int, pageURL string, username string) (err error) { //сохранение страницы в хранилище
 
 	defer func() { err = e.WrapIfErr("cant do command:save page", err) }() //Она обрабатывает ошибку только если она не nil.
+
 	page := &storage.Page{
 		URL:      pageURL,
 		UserName: username,
 	}
+
 	myStorage := &MyStorage{}
 
 	isExists, err := myStorage.IsExists(*page) //существует ли ссылка уже
 	if err != nil {
 		return err
 	}
+
 	if isExists {
 		return SendMessage(chatID, msgAlreadyExists)
 	}
-	if err := myStorage.Save(page.URL); err != nil {
+
+	// Получение имени файла из URL-адреса
+	// Получение имени файла из URL-адреса
+	filename := path.Base(page.URL)
+
+	// Вычисление хеш-суммы имени файла
+	checksum := md5.Sum([]byte(filename))
+	checksumStr := hex.EncodeToString(checksum[:])
+
+	if err := myStorage.Save(checksumStr); err != nil {
 		return err
 	}
+
 	if err := SendMessage(chatID, msgSaved); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -129,6 +146,7 @@ type MyStorage struct {
 	Data      string
 	URL       string
 	UserPages []*UserPage
+	XData     map[string]string
 }
 
 func (s *MyStorage) Save(filename string) error {
@@ -177,12 +195,16 @@ func sendRandom(chatID int, username string) (err error) {
 	if errors.Is(err, storage.ErrNoSavedPages) {
 		return SendMessage(chatID, msgNoSavedPages) //если ниче не сохранил
 	}
-	if err := SendMessage(chatID, myStorage.URL); err != nil { //если удалось найти ссылку
+	if err := SendMessage(chatID, page.URL); err != nil { //если удалось найти ссылку
 		return err
 	}
 
-	return myStorage.Remove(page) //удаляем ссылку
+	err = myStorage.Remove(page) //удаляем ссылку
+	if err != nil {
+		return err
+	}
 
+	return nil
 }
 
 func (s *MyStorage) Remove(p *storage.Page) error {
@@ -264,6 +286,6 @@ func isAddCmd(text string) bool {
 
 }
 func isURL(text string) bool {
-	u, err := url.Parse(text)         //распарсить URL-проанализировать текстовую запись URL и извлечь из него основные компоненты: хост, порт, путь, параметры и фрагмент
-	return err == nil && u.Host != "" //если при разборе нет ошибки и хост из разобарнного url не пустой
+	u, err := url.Parse(text)                                                        //распарсить URL-проанализировать текстовую запись URL и извлечь из него основные компоненты: хост, порт, путь, параметры и фрагмент
+	return err == nil && u.Host != "" && (u.Scheme == "http" || u.Scheme == "https") //если при разборе нет ошибки и хост из разобарнного url не пустой
 }
